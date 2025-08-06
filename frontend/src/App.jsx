@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 // Import Lucide React icons
-import { Search, Plus, Edit3, Trash2, Hammer, AlertTriangle, TrendingUp, MapPin, Calendar, Wrench, Package2 } from 'lucide-react';
+import { Search, Plus, Edit3, Trash2, Hammer, AlertTriangle, TrendingUp, MapPin, Calendar, Wrench, Package2, LogIn, User, Lock } from 'lucide-react';
 // Import the external CSS file
 import './App.css'; // Make sure this line is present to link the CSS
 
@@ -10,6 +10,14 @@ const App = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Auth states
+  const [token, setToken] = useState(localStorage.getItem('token'));
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
 
   // Filter states
   const [filteredItems, setFilteredItems] = useState([]);
@@ -44,15 +52,66 @@ const App = () => {
 
   const API_BASE_URL = 'http://127.0.0.1:8000/api/'; // Base URL for your Django API - CORRECTED
 
+  // --- Auth Functions ---
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}token/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.non_field_errors || 'Login failed');
+      }
+      const data = await response.json();
+      localStorage.setItem('token', data.token);
+      setToken(data.token);
+    } catch (err) {
+      setAuthError(err.message);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    setToken(null);
+  };
+
+
   // --- Data Fetching from Django Backend ---
+
+  const fetchWithAuth = useCallback(async (url, options = {}) => {
+    const headers = {
+      ...options.headers,
+      'Content-Type': 'application/json',
+      'Authorization': `Token ${token}`
+    };
+
+    const response = await fetch(url, { ...options, headers });
+
+    if (response.status === 401) {
+      handleLogout();
+      throw new Error('Unauthorized: Session expired. Please log in again.');
+    }
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  }, [token]);
+
 
   // Fetch Disciplines (for Category dropdown)
   useEffect(() => {
+    if (!token) return;
     const fetchDisciplines = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}disciplines/`);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const data = await response.json();
+        const data = await fetchWithAuth(`${API_BASE_URL}disciplines/`);
         setDisciplinesList(data);
       } catch (err) {
         console.error("Error fetching disciplines:", err);
@@ -60,10 +119,11 @@ const App = () => {
       }
     };
     fetchDisciplines();
-  }, [API_BASE_URL]);
+  }, [API_BASE_URL, fetchWithAuth, token]);
 
   // Fetch Materials (main data for the table)
   const fetchMaterials = useCallback(async () => {
+    if (!token) return;
     setLoading(true);
     setError(null);
     let queryParams = new URLSearchParams();
@@ -85,9 +145,7 @@ const App = () => {
     const materialsUrl = `${API_BASE_URL}materials/?${queryParams.toString()}`;
 
     try {
-      const response = await fetch(materialsUrl);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const data = await response.json();
+      const data = await fetchWithAuth(materialsUrl);
 
       // Map Django data structure to the frontend's desired 'item' structure
       const mappedItems = data.map(m => ({
@@ -123,12 +181,16 @@ const App = () => {
       setError(err);
       setLoading(false);
     }
-  }, [selectedCategory, selectedType, disciplinesList, API_BASE_URL]);
+  }, [selectedCategory, selectedType, disciplinesList, API_BASE_URL, fetchWithAuth, token]);
 
   // Initial fetch and re-fetch on filter changes
   useEffect(() => {
-    fetchMaterials();
-  }, [fetchMaterials]);
+    if (token) {
+      fetchMaterials();
+    } else {
+      setLoading(false);
+    }
+  }, [fetchMaterials, token]);
 
   // --- Frontend Filtering Logic (operates on 'items' state) ---
   useEffect(() => {
@@ -173,36 +235,11 @@ const App = () => {
     };
 
     try {
-      const response = await fetch(`${API_BASE_URL}materials/`, {
+      const addedMaterial = await fetchWithAuth(`${API_BASE_URL}materials/`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify(payload),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        let errorMessage = 'Failed to add item.';
-        if (response.status === 400) {
-          if (errorData.material_name && errorData.material_name.includes("dim material with this material name already exists.")) {
-            errorMessage = "Material name already exists. Please choose a unique name.";
-          } else if (errorData.material_name && errorData.material_name.includes("This field must be unique.")) {
-            errorMessage = "Material name must be unique. Please choose a different name.";
-          } else if (errorData.non_field_errors) {
-            errorMessage = `Failed to add item: ${errorData.non_field_errors.join(', ')}`;
-          } else {
-            errorMessage = `Validation error: ${JSON.stringify(errorData)}`;
-          }
-        } else if (errorData.detail) {
-          errorMessage = `Failed to add item: ${errorData.detail}`;
-        } else {
-          errorMessage = `HTTP error! status: ${response.status}`;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const addedMaterial = await response.json();
       setFormSubmitMessage({ type: 'success', text: `Item '${addedMaterial.material_name}' added successfully!` });
       fetchMaterials(); // Refresh the list from the backend
       resetForm();
@@ -256,36 +293,11 @@ const App = () => {
     };
 
     try {
-      const response = await fetch(`${API_BASE_URL}materials/${editingItem.id}/`, {
-        method: 'PUT', // Use PUT for full update
-        headers: {
-          'Content-Type': 'application/json',
-        },
+      const updatedMaterial = await fetchWithAuth(`${API_BASE_URL}materials/${editingItem.id}/`, {
+        method: 'PUT',
         body: JSON.stringify(payload),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        let errorMessage = 'Failed to update item.';
-        if (response.status === 400) {
-          if (errorData.material_name && errorData.material_name.includes("dim material with this material name already exists.")) {
-            errorMessage = "Material name already exists. Please choose a unique name.";
-          } else if (errorData.material_name && errorData.material_name.includes("This field must be unique.")) {
-            errorMessage = "Material name must be unique. Please choose a different name.";
-          } else if (errorData.non_field_errors) {
-            errorMessage = `Failed to update item: ${errorData.non_field_errors.join(', ')}`;
-          } else {
-            errorMessage = `Validation error: ${JSON.stringify(errorData)}`;
-          }
-        } else if (errorData.detail) {
-          errorMessage = `Failed to update item: ${errorData.detail}`;
-        } else {
-          errorMessage = `HTTP error! status: ${response.status}`;
-        }
-        throw new Error(errorMessage);
-      }
-
-      const updatedMaterial = await response.json();
       setFormSubmitMessage({ type: 'success', text: `Item '${updatedMaterial.material_name}' updated successfully!` });
       fetchMaterials(); // Refresh the list from the backend
       setEditingItem(null);
@@ -303,14 +315,14 @@ const App = () => {
     // Custom confirmation modal instead of window.confirm
     const confirmed = await new Promise(resolve => {
       const modal = document.createElement('div');
-      modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50';
+      modal.className = 'modal-overlay';
       modal.innerHTML = `
-        <div class="bg-white rounded-xl max-w-sm w-full p-6 text-center">
-          <h3 class="text-lg font-bold mb-4">Confirm Deletion</h3>
-          <p class="text-gray-700 mb-6">Are you sure you want to delete this item?</p>
-          <div class="flex justify-center space-x-4">
-            <button id="cancelDelete" class="px-6 py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium">Cancel</button>
-            <button id="confirmDelete" class="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium">Delete</button>
+        <div class="modal-content">
+          <h3 class="modal-header">Confirm Deletion</h3>
+          <p>Are you sure you want to delete this item?</p>
+          <div class="flex justify-end space-x-4">
+            <button id="cancelDelete" class="btn">Cancel</button>
+            <button id="confirmDelete" class="btn btn-primary">Delete</button>
           </div>
         </div>
       `;
@@ -329,15 +341,7 @@ const App = () => {
     if (!confirmed) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}materials/${id}/`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-      }
-
+      await fetchWithAuth(`${API_BASE_URL}materials/${id}/`, { method: 'DELETE' });
       setFormSubmitMessage({ type: 'success', text: `Item deleted successfully!` });
       fetchMaterials(); // Refresh the list
 
@@ -381,6 +385,54 @@ const App = () => {
     }
   };
 
+  if (!token) {
+    return (
+      <div className="login-container">
+        <div className="login-form-container">
+          <div className="login-header">
+            <Hammer className="h-12 w-12 text-orange-600 mb-4" />
+            <h1 className="text-3xl font-bold text-gray-800">Construction Inventory</h1>
+            <p className="text-gray-600">Please log in to continue</p>
+          </div>
+          <form onSubmit={handleLogin}>
+            {authError && <p className="bg-red-100 text-red-700 p-3 mb-4 rounded-lg text-center">{authError}</p>}
+            <div className="input-group">
+              <User className="input-icon" />
+              <input
+                type="text"
+                placeholder="Username"
+                className="input-dark"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+              />
+            </div>
+            <div className="input-group">
+              <Lock className="input-icon" />
+              <input
+                type="password"
+                placeholder="Password"
+                className="input-dark"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="btn btn-primary w-full mt-6"
+              disabled={isLoggingIn}
+            >
+              <LogIn className="btn-icon" />
+              {isLoggingIn ? 'Logging in...' : 'Login'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+
   // --- Render Logic ---
   if (loading && items.length === 0) {
     return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-gray-700">Loading inventory...</div>;
@@ -391,80 +443,83 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* All custom CSS moved to App.css */}
-
+    <div className="app-container">
       {/* Header */}
-      <div className="bg-gradient-to-r from-orange-600 to-red-600 shadow-lg">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            <div className="flex items-center">
-              <Hammer className="h-8 w-8 text-white mr-3" />
-              <div>
-                <h1 className="text-3xl font-bold text-white">Construction Inventory</h1>
-                <p className="text-orange-100">Materials & Equipment Management</p>
-              </div>
+      <div className="header">
+        <div className="header-content">
+          <div className="header-title">
+            <Hammer className="h-8 w-8 text-white mr-3" />
+            <div className="header-text">
+              <h1>Construction Inventory</h1>
+              <p>Materials & Equipment Management</p>
             </div>
+          </div>
+          <div className="flex items-center">
+            <button
+              onClick={handleLogout}
+              className="btn btn-primary mr-4"
+            >
+              Logout
+            </button>
             <button
               onClick={() => {
                 setEditingItem(null); // Ensure we're in 'add' mode
                 resetForm(); // Clear form fields
                 setShowAddForm(true);
               }}
-              className="bg-white text-orange-600 hover:bg-orange-50 px-6 py-3 rounded-lg flex items-center font-semibold transition-colors shadow-lg"
+              className="btn btn-primary"
             >
-              <Plus className="h-5 w-5 mr-2" />
+              <Plus className="btn-icon" />
               Add Item
             </button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="main-content">
         {/* Stats Cards */}
-        {/* Changed md:grid-cols-4 to sm:grid-cols-4 to make it responsive at smaller screens */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="stats-grid">
           {/* Total Items Card */}
-          <div className="bg-white rounded-xl shadow-lg p-4 border-l-4 border-l-blue-500 flex items-center">
-            <div className="p-2 bg-blue-100 rounded-xl flex-shrink-0">
+          <div className="stat-card border-l-blue-500">
+            <div className="stat-card-icon bg-blue-100">
               <Package2 className="h-6 w-6 text-blue-600" />
             </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-600">Total Items</p>
-              <p className="text-2xl font-bold text-gray-900">{items.length}</p>
+            <div className="ml-3 stat-card-info">
+              <p>Total Items</p>
+              <p>{items.length}</p>
             </div>
           </div>
 
           {/* Total Value Card */}
-          <div className="bg-white rounded-xl shadow-lg p-4 border-l-4 border-l-green-500 flex items-center">
-            <div className="p-2 bg-green-100 rounded-xl flex-shrink-0">
+          <div className="stat-card border-l-green-500">
+            <div className="stat-card-icon bg-green-100">
               <TrendingUp className="h-6 w-6 text-green-600" />
             </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-600">Total Value</p>
-              <p className="text-2xl font-bold text-gray-900">${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            <div className="ml-3 stat-card-info">
+              <p>Total Value</p>
+              <p>${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             </div>
           </div>
 
           {/* Low Stock Items Card */}
-          <div className="bg-white rounded-xl shadow-lg p-4 border-l-4 border-l-orange-500 flex items-center">
-            <div className="p-2 bg-orange-100 rounded-xl flex-shrink-0">
+          <div className="stat-card border-l-orange-500">
+            <div className="stat-card-icon bg-orange-100">
               <AlertTriangle className="h-6 w-6 text-orange-600" />
             </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-600">Low Stock Items</p>
-              <p className="text-2xl font-bold text-gray-900">{lowStockItems.length}</p>
+            <div className="ml-3 stat-card-info">
+              <p>Low Stock Items</p>
+              <p>{lowStockItems.length}</p>
             </div>
           </div>
 
           {/* Critical Items Card */}
-          <div className="bg-white rounded-xl shadow-lg p-4 border-l-4 border-l-red-500 flex items-center">
-            <div className="p-2 bg-red-100 rounded-xl flex-shrink-0">
+          <div className="stat-card border-l-red-500">
+            <div className="stat-card-icon bg-red-100">
               <AlertTriangle className="h-6 w-6 text-red-600" />
             </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-600">Critical Items</p>
-              <p className="text-2xl font-bold text-gray-900">{criticalItems.length}</p>
+            <div className="ml-3 stat-card-info">
+              <p>Critical Items</p>
+              <p>{criticalItems.length}</p>
             </div>
           </div>
         </div>
@@ -485,21 +540,21 @@ const App = () => {
         )}
 
         {/* Filters */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
+        <div className="filters-container">
+          <div className="filters-grid">
+            <div className="input-group">
+              <Search className="input-icon" />
               <input
                 type="text"
                 placeholder="Search by name or SKU..."
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                className="input-dark"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
 
             <select
-              className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+              className="select-dark"
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
             >
@@ -510,7 +565,7 @@ const App = () => {
             </select>
 
             <select
-              className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+              className="select-dark"
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value)}
             >
@@ -523,27 +578,27 @@ const App = () => {
         </div>
 
         {/* Items Table */}
-        <div className="bg-white rounded-xl shadow-lg border overflow-hidden">
+        <div className="table-container">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+            <table className="table">
+              <thead className="table-header">
                 <tr>
-                  <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Details</th><th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th><th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th><th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th><th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th><th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th><th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Restocked</th><th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th>Item Details</th><th>Category</th><th>Stock</th><th>Unit Price</th><th>Status</th><th>Location</th><th>Last Restocked</th><th>Actions</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="table-body">
                 {filteredItems.map((item) => {
                   const stockStatus = getStockStatus(item);
                   return (
-                    <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4">
+                    <tr key={item.id} className="table-row">
+                      <td className="table-cell">
                         <div>
                           <div className="text-sm font-medium text-gray-900">{item.name}</div>
                           <div className="text-sm text-gray-500">SKU: {item.sku}</div>
                           {/* Supplier not directly mapped */}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="table-cell">
                         <div className="flex items-center">
                           <div className="text-gray-500 mr-2">
                             {getCategoryIcon(item.category)}
@@ -554,33 +609,33 @@ const App = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="table-cell">
                         <div className="text-sm font-bold text-gray-900">{item.quantity} {item.unit}</div>
                         <div className="text-xs text-gray-500">Alert at {item.lowStock}</div> {/* lowStock is placeholder */}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="table-cell">
                         {/* Price is placeholder. cost_per_unit is on FactInventoryTransactions */}
                         <div className="text-sm font-medium text-gray-900">${item.price.toFixed(2)}</div>
                         <div className="text-xs text-gray-500">per {item.unit.slice(0, -1)}</div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="table-cell">
                         <span className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full border ${stockStatus.color}`}>
                           {stockStatus.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="table-cell">
                         <div className="flex items-center text-sm text-gray-500">
                           <MapPin className="h-4 w-4 mr-1" />
                           {item.location} {/* Placeholder */}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="table-cell">
                         <div className="flex items-center text-sm text-gray-500">
                           <Calendar className="h-4 w-4 mr-1" />
                           {new Date(item.lastRestocked).toLocaleDateString()} {/* Placeholder */}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="table-cell">
                         <div className="flex space-x-2">
                           <button
                             onClick={() => handleEditItem(item)}
@@ -607,9 +662,9 @@ const App = () => {
 
       {/* Add/Edit Modal */}
       {showAddForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[100]">
-          <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-screen overflow-y-auto">
-            <h2 className="text-2xl font-bold mb-6 text-gray-900">
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h2 className="modal-header">
               {editingItem ? 'Edit Item' : 'Add New Item'}
             </h2>
 
@@ -619,12 +674,12 @@ const App = () => {
               </p>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="col-span-full">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Item Name <span className="text-red-500">*</span></label>
+            <div className="form-grid">
+              <div className="form-group col-span-full">
+                <label className="form-label">Item Name <span className="text-red-500">*</span></label>
                 <input
                   type="text"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.name}
                   onChange={(e) => setNewItem({...newItem, name: e.target.value})}
                   placeholder="e.g., Concrete Mix - 50lb Bags"
@@ -633,11 +688,11 @@ const App = () => {
               </div>
 
               {/* SKU is not directly mapped to backend, but kept for UI consistency */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">SKU</label>
+              <div className="form-group">
+                <label className="form-label">SKU</label>
                 <input
                   type="text"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.sku}
                   onChange={(e) => setNewItem({...newItem, sku: e.target.value})}
                   placeholder="e.g., CON-MIX-50"
@@ -646,21 +701,21 @@ const App = () => {
               </div>
 
               {/* Supplier not directly mapped to backend */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Supplier</label>
+              <div className="form-group">
+                <label className="form-label">Supplier</label>
                 <input
                   type="text"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.supplier}
                   onChange={(e) => setNewItem({...newItem, supplier: e.target.value})}
                   placeholder="e.g., BuildCorp Supply"
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Category (Discipline) <span className="text-red-500">*</span></label>
+              <div className="form-group">
+                <label className="form-label">Category (Discipline) <span className="text-red-500">*</span></label>
                 <select
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="select-dark"
                   value={newItem.category}
                   onChange={(e) => setNewItem({...newItem, category: e.target.value})}
                   required
@@ -672,11 +727,11 @@ const App = () => {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Type (Material Type)</label>
+              <div className="form-group">
+                <label className="form-label">Type (Material Type)</label>
                 <input
                   type="text"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.type}
                   onChange={(e) => setNewItem({...newItem, type: e.target.value})}
                   placeholder="e.g., Consumable, Raw Material"
@@ -686,21 +741,21 @@ const App = () => {
               {/* Quantity is current stock, not directly editable for DimMaterial */}
               {/* This field is typically updated via FactInventoryTransactions */}
               {/* For now, we omit it from the Material form, or make it display-only */}
-              {/* <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Quantity</label>
+              {/* <div className="form-group">
+                <label className="form-label">Quantity</label>
                 <input
                   type="number"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.quantity}
                   onChange={(e) => setNewItem({...newItem, quantity: e.target.value})}
                   disabled // Quantity is derived, not set directly here
                 />
               </div> */}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Unit of Measure <span className="text-red-500">*</span></label>
+              <div className="form-group">
+                <label className="form-label">Unit of Measure <span className="text-red-500">*</span></label>
                 <select
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="select-dark"
                   value={newItem.unit}
                   onChange={(e) => setNewItem({...newItem, unit: e.target.value})}
                   required
@@ -713,33 +768,33 @@ const App = () => {
               </div>
 
               {/* Price per Unit not directly on DimMaterial */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Color</label>
+              <div className="form-group">
+                <label className="form-label">Color</label>
                 <input
                   type="text"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.color}
                   onChange={(e) => setNewItem({...newItem, color: e.target.value})}
                   placeholder="e.g., White, Red"
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Size</label>
+              <div className="form-group">
+                <label className="form-label">Size</label>
                 <input
                   type="text"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.size}
                   onChange={(e) => setNewItem({...newItem, size: e.target.value})}
                   placeholder="e.g., 8ft, #8 x 2.5''"
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Brand</label>
+              <div className="form-group">
+                <label className="form-label">Brand</label>
                 <input
                   type="text"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.brand}
                   onChange={(e) => setNewItem({...newItem, brand: e.target.value})}
                   placeholder="e.g., DeWalt, GRK"
@@ -748,30 +803,30 @@ const App = () => {
 
               {/* Low Stock Alert, Location, Last Restocked are not directly mapped */}
               {/* If you add these to DimMaterial model, they can be uncommented and mapped */}
-              {/* <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Low Stock Alert</label>
+              {/* <div className="form-group">
+                <label className="form-label">Low Stock Alert</label>
                 <input
                   type="number"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.lowStock}
                   onChange={(e) => setNewItem({...newItem, lowStock: e.target.value})}
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Location</label>
+              <div className="form-group">
+                <label className="form-label">Location</label>
                 <input
                   type="text"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.location}
                   onChange={(e) => setNewItem({...newItem, location: e.target.value})}
                   placeholder="e.g., Yard A, Tool Shed"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Last Restocked</label>
+              <div className="form-group">
+                <label className="form-label">Last Restocked</label>
                 <input
                   type="date"
-                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                  className="input-dark"
                   value={newItem.lastRestocked}
                   onChange={(e) => setNewItem({...newItem, lastRestocked: e.target.value})}
                 />
@@ -781,13 +836,13 @@ const App = () => {
             <div className="flex justify-end space-x-3 mt-8">
               <button
                 onClick={resetForm}
-                className="px-6 py-3 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+                className="btn btn-primary"
               >
                 Cancel
               </button>
               <button
                 onClick={editingItem ? handleUpdateItem : handleAddItem}
-                className="px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors font-medium"
+                className="btn btn-primary"
                 disabled={isSubmittingForm || !newItem.name || !newItem.unit || !newItem.category}
               >
                 {isSubmittingForm ? (editingItem ? 'Updating...' : 'Adding...') : (editingItem ? 'Update Item' : 'Add Item')}

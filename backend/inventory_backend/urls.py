@@ -1,23 +1,15 @@
-"""
-URL configuration for inventory_backend project.
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/5.2/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
-"""
+# backend/inventory_backend/urls.py
 from django.contrib import admin
 from django.urls import path, include
+from django.shortcuts import redirect
+from rest_framework.authtoken import views # Import DRF's built-in token views
 
 urlpatterns = [
+    # Redirect the root URL to the API root
+    path('', lambda request: redirect('api/', permanent=False)), # ADDED: Redirect for root path
     path('admin/', admin.site.urls),
     path('api/', include('inventory.urls')), # Include the inventory app's URLs
+    # Add DRF's built-in token authentication endpoint
+    # This provides a simple endpoint to get a token for a user
+    path('api/token-auth/', views.obtain_auth_token),
 ]

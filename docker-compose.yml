@@ -1,30 +1,31 @@
 services:
   db:
-    image: postgres:16-alpine # Lightweight PostgreSQL image
-    restart: always
-    environment:
-      POSTGRES_DB: construction_inventory_db # The new database name for your inventory
-      POSTGRES_USER: danny # Database user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # Database password from .env file
-    volumes:
-      - pg_inventory_data:/var/lib/postgresql/data # Persistent data volume for the database
-      - ./init_star_schema.sql:/docker-entrypoint-initdb.d/init_star_schema.sql # Mount the schema initialization script
+    image: mongo:latest
+    container_name: construction_inventory_db_mongo 
     ports:
-      - "5432:5432" # Map host port 5432 to container port 5432
+      - "27017:27017"
+    volumes:
+      - mongo_inventory_data:/data/db # Persistent data volume for MongoDB
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE}
+    restart: always
 
-  pgadmin:
-    image: dpage/pgadmin4 # Official pgAdmin 4 image
-    restart: always
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL} # pgAdmin login email
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD} # pgAdmin login password from .env file
+  mongo-express:
+    image: mongo-express:latest
+    container_name: mongo_express_gui
     ports:
-      - "8080:80" # Map host port 8080 to container port 80 (pgAdmin web interface)
+      - '8081:8081'
+    environment:
+      ME_CONFIG_MONGODB_SERVER: db # Connect to the MongoDB service
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_INITDB_ROOT_USERNAME} # Admin username
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME} # Credentials for Mongo Express GUI
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD}
     depends_on:
-      - db # Ensure db service starts before pgadmin
-    volumes:
-      - pgadmin_inventory_data:/var/lib/pgadmin # Persistent data volume for pgAdmin settings
+      - db # Ensure db service starts before mongo-express
+    restart: always
 
 volumes:
-  pg_inventory_data: # Volume for PostgreSQL database files
-  pgadmin_inventory_data: # Volume for pgAdmin configuration and user data
+  mongo_inventory_data: # Named volume for MongoDB data persistence

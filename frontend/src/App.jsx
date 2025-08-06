@@ -21,7 +21,7 @@ const App = () => {
 
   // Filter states
   const [filteredItems, setFilteredItems] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(''); // Corrected: useState('')
   const [selectedCategory, setSelectedCategory] = useState('All'); // Maps to Django Discipline
   const [selectedType, setSelectedType] = useState('All');     // Maps to Django Material Type
 
@@ -48,9 +48,9 @@ const App = () => {
 
   // Initial list of common units for the form dropdown, will be augmented by fetched data
   const initialUnits = ['each', 'pieces', 'bags', 'sheets', 'feet', 'meters', 'gallons', 'liters', 'boxes', 'kits', 'sections', 'rolls', 'bundles', 'yards', 'sq ft', 'cu yd'];
-  const [unitsList, setUnitsList] = useState(initialUnits); // Initialized with common units
+  const [unitsList, setUnitsList] = useState(initialUnits); // CORRECTED: Initialize with useState
 
-  const API_BASE_URL = 'http://127.0.0.1:8000/api/'; // Base URL for your Django API - CORRECTED
+  const API_BASE_URL = 'http://127.0.0.1:8000/api/'; // Base URL for your Django API
 
   // --- Auth Functions ---
   const handleLogin = async (e) => {
@@ -58,7 +58,8 @@ const App = () => {
     setIsLoggingIn(true);
     setAuthError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}token/`, {
+      // CORRECTED: Use 'token-auth/' for the login endpoint
+      const response = await fetch(`${API_BASE_URL}token-auth/`, { // FIXED: Removed accidental 'import React...'
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -157,7 +158,7 @@ const App = () => {
         quantity: m.current_stock !== null ? parseFloat(m.current_stock) : 0, // Convert to number
         unit: m.unit_of_measure || 'units',
         // These fields are not directly from your current Django models (DimMaterial/FactInventoryTransactions)
-        // They would require backend schema/serializer changes if needed for persistence.
+        // They would require backend schema/serializer changes if needed for persistence:
         price: 0, // Placeholder, as cost_per_unit is in FactInventoryTransactions
         lowStock: 10, // Placeholder
         location: 'Warehouse', // Placeholder

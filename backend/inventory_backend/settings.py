@@ -12,12 +12,11 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
-from dotenv import load_dotenv  
+from dotenv import load_dotenv
+import mongoengine # Import mongoengine for connection
 
 # Load environment variables from .env file
 load_dotenv()
-
-POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD')  # Ensure this is set in your .env file
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -48,17 +47,27 @@ INSTALLED_APPS = [
     'inventory',  # Your inventory app
     'rest_framework', # For Django REST Framework
     'rest_framework.authtoken', # For token authentication
-    'django_filters', # For filtering in DRF
+    # REMOVED: 'django_filters', # This line should be removed
 ]
 
+# Django REST Framework settings
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
+        'rest_framework.permissions.AllowAny', # AllowAny for development
+        # 'rest_framework.permissions.IsAuthenticated', # Use this for production/secured API
     ],
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+        'rest_framework.renderers.BrowsableAPIRenderer',
+    ],
+    # REMOVED: 'DEFAULT_FILTER_BACKENDS': [
+    # REMOVED:    'django_filters.rest_framework.DjangoFilterBackend'
+    # REMOVED: ]
 }
+
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -79,7 +88,7 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 # If you need to allow credentials (e.g., cookies, authorization headers)
-CORS_ALLOW_CREDENTIALS = True 
+CORS_ALLOW_CREDENTIALS = True
 
 ROOT_URLCONF = 'inventory_backend.urls'
 
@@ -90,6 +99,7 @@ TEMPLATES = [
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
+                'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
@@ -102,18 +112,23 @@ WSGI_APPLICATION = 'inventory_backend.wsgi.application'
 
 
 # Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
+# This is for Django's built-in apps (Auth, Admin, Sessions, etc.)
+# Even if you use MongoEngine for your custom models, Django's core still needs a relational DB.
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'construction_inventory_db', # Your database name
-        'USER': 'danny', # Your PostgreSQL user
-        'PASSWORD': os.environ.get('POSTGRES_PASSWORD'), # <-- IMPORTANT: Replace with your actual POSTGRES_PASSWORD from .env
-        'HOST': 'localhost', # Since Django is running on your host machine
-        'PORT': '5432', # Your mapped host port for PostgreSQL
+        'ENGINE': 'django.db.backends.sqlite3', # Using SQLite for simplicity for Django's internal needs
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
+
+# MongoDB Connection (using MongoEngine)
+mongoengine.connect(
+    db=os.environ.get('MONGO_INITDB_DATABASE'),
+    host='mongodb://localhost:27017/', # Connect to localhost
+    username=os.environ.get('MONGO_INITDB_ROOT_USERNAME'),
+    password=os.environ.get('MONGO_INITDB_ROOT_PASSWORD'),
+    authentication_source='admin'
+)
 
 
 # Password validation
@@ -148,7 +163,7 @@ USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/howto/static-files/
+# https://docs.djangoproject.com/en/5.2/topics/staticfiles/
 
 STATIC_URL = 'static/'
 

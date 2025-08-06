@@ -1,14 +1,22 @@
 [project]
 name = "construction-db"
 version = "0.1.0"
-description = "Add your description here"
+description = "A Django and React inventory management system."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "django>=5.2.4",
-    "django-cors-headers>=4.7.0",
-    "django-filter>=25.1",
-    "djangorestframework>=3.16.0",
-    "psycopg2-binary>=2.9.10",
+    "asgiref~=3.4.1",
+    "django",
+    "django-cors-headers~=3.13.0",
+    "djangorestframework",
+    "mongoengine",
     "python-dotenv>=1.1.1",
+    "pytz>=2024.1",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["backend"]

@@ -3,7 +3,7 @@
 echo "Starting development environment..."
 
 # Start the database
-echo "Starting PostgreSQL database container..."
+echo "Starting Mongo database container..."
 docker-compose up -d db
 
 # Start the backend server
